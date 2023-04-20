@@ -8,6 +8,8 @@
  *      Xu.Cao      2023-04-14  0.0.2               创建了本代码
  *      Xu.Cao      2023-04-16  0.0.3               1. 修改了不安全的任务队列的使用
  *                                                  2. 增加了对任务数量的维护，从而更好地对线程池进行控制
+ *      Xu.Cao      2023-04-20  0.0.4               1. 删除批量模式控制，所有线程均批量执行，通过任务窃取实现任务的均摊
+ *                                                  2. 增加了对提交任务的限制，关闭线程池不能提交任务，增强健壮性
  */
 
 #ifndef IDLE_THREAD_POOL_H
@@ -21,12 +23,10 @@
 #include "core_thread.h"
 
 class thread_pool {
-    std::atomic<size_t> n_tasks;   // 用于记录当前任务队列中的任务数量
     safe_queue<task> m_tasks;
     std::vector<core_thread *> m_core_threads;
     std::thread m_manager;
     bool f_is_shutdown = false;
-    bool f_is_batch = false;
 
     /**
      * 将任务队列中的任务分配到核心线程中，为了尽可能的平均分配，
@@ -34,14 +34,10 @@ class thread_pool {
      * 设定的最大任务数
      */
     void dispatch() {
-        size_t size_for_each = config::max_tasks_size;
-        size_for_each = std::min(size_for_each, n_tasks.load() / 3);
-        size_for_each = f_is_batch ? size_for_each : 1;
+        size_t size_for_each = config::max_running_tasks_group;
 
         for (auto *core: m_core_threads) {
-            core->set_flag_batch(f_is_batch);
-
-            n_tasks -= core->fill_cache(m_tasks, size_for_each);
+            core->fill_cache(m_tasks, size_for_each);
         }
     }
 
@@ -53,21 +49,16 @@ class thread_pool {
      */
     void manage() {
         while (!f_is_shutdown) {
-            if (!f_is_shutdown && n_tasks >= config::max_tasks_size) {
-                f_is_batch = true;
-            } else {
-                f_is_batch = false;
-            }
-
             dispatch();
         }
 
         /*
-         * 到此线程池已经被结束，但是任务队列还有剩余的任务，所以还要按需求继续分配
-         * 如果任务的数量仍然不低于最大任务量，则继续分配，然后剩下的任务将在本线程完成
+         * 到此线程池已经被结束，但是任务队列还有剩余的任务，所以还要按需求继续分配；
+         * 如果任务的数量仍然不低于最大任务量，则继续分配，然后剩下的任务将在本线程完成；
+         * @NOTE 此外，这里使用了不安全的 size 函数，因为只用做估计，可以牺牲忽略不计的
+         *       安全性问题，提升程序性能
          */
-        while (n_tasks >= config::max_tasks_size) {
-            f_is_shutdown = true;
+        while (m_tasks.size() >= config::max_tasks_capacity) {
             dispatch();
         }
 
@@ -83,7 +74,7 @@ class thread_pool {
     }
 
 public:
-    explicit thread_pool() : m_core_threads(std::vector<core_thread *>(config::core_threads_size)), n_tasks(0) {}
+    explicit thread_pool() : m_core_threads(std::vector<core_thread *>(config::core_threads_size)) {}
 
     ~thread_pool() {
         if (!f_is_shutdown) {
@@ -146,13 +137,16 @@ public:
     template<typename F, typename... Args>
     std::future<typename std::result_of<F()>::type> submit(F &&f, Args &&...args) {
 
+        if (f_is_shutdown) {
+            throw std::runtime_error("线程池已经被关闭，正在执行残余任务，不能继续提交任务！");
+        }
+
         using result_type = typename std::result_of<F()>::type;
         std::packaged_task<result_type()> task_(std::bind(std::forward<F>(f),
                                                           std::forward<Args>(args)...));
         std::future<result_type> res(task_.get_future());
 
         m_tasks.push(task(std::move(task_)));
-        n_tasks++;
 
         return res;
     }

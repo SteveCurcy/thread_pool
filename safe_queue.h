@@ -7,7 +7,7 @@
  *      <author>    <time>      <version>           <description>
  *      Xu.Cao      2023-04-14  0.0.2               创建了本代码
  *      Xu.Cao      2023-04-16  0.0.3               1. 修改了所有弹出和插入代码，细化返回状态，详情见注释
- *                                                  2. 删除了 empty, size, plunder 不安全的函数
+ *                                                  2. 删除了 empty, plunder 不安全的函数，暂时保留 size
  *                                                  3. 加入了一次性弹出函数和从另一个安全队列插入的函数
  */
 
@@ -32,6 +32,10 @@ public:
     ~safe_queue() = default;
 
     safe_queue(safe_queue &&) = delete;
+
+    size_t size() {
+        return m_deque.size();
+    }
 
     /**
      * 将一个元素插入到队列的末尾

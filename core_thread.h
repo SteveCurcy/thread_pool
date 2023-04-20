@@ -9,6 +9,8 @@
  *      <author>    <time>      <version>           <description>
  *      Xu.Cao      2023-04-14  0.0.2               创建了本代码
  *      Xu.Cao      2023-04-16  0.0.3               修复了触发 bad_function_call 的 bug
+ *      Xu.Cao      2023-04-20  0.0.4               1. 删除了批量执行模式的修改 f_is_batch，只能批量执行；
+ *                                                  2. 由于只能批量执行，所以线程是否正在运行不重要，删除 f_is_running
  */
 
 #ifndef THREAD_CORE_THREAD_H
@@ -28,30 +30,9 @@ class core_thread {
     std::thread m_thread;
     bool f_is_shutdown = false;
     bool f_is_running = false;
-    bool f_is_batch = false;
-
-    bool get_task_from_cache(task &task_) {
-        return m_tasks_cache.pop_front(task_) == 1;
-    }
 
     bool get_tasks_from_cache(std::vector<task> &tasks) {
-        return m_tasks_cache.pop_front(tasks, config::max_tasks_size) > 0;
-    }
-
-    bool steal_task_from_pool(task &task_) {
-        bool result = false;
-
-        for (auto *core: core_pool_threads) {
-            if (core == this) {
-                continue;
-            }
-            if (core->m_tasks_cache.pop_back(task_) == 1) {
-                result = true;
-                break;
-            }
-        }
-
-        return result;
+        return m_tasks_cache.pop_front(tasks, config::max_running_tasks_group) > 0;
     }
 
     bool steal_tasks_from_pool(std::vector<task> &tasks) {
@@ -61,7 +42,7 @@ class core_thread {
             if (core == this) {
                 continue;
             }
-            if (core->m_tasks_cache.pop_back(tasks, config::max_tasks_size, (config::max_tasks_size / 5)) > 0) {
+            if (core->m_tasks_cache.pop_back(tasks, config::max_running_tasks_group, (config::max_tasks_capacity / 5)) > 0) {
                 result = true;
                 break;
             }
@@ -78,26 +59,13 @@ class core_thread {
 
         std::vector<task> tasks;
         while (!f_is_shutdown) {
-            if (f_is_batch) {
-                if (get_tasks_from_cache(tasks) || steal_tasks_from_pool(tasks)) {
-                    for (auto &&task_: tasks) {
-                        f_is_running = true;
-                        task_();
-                        f_is_running = false;
-                    }
-                    tasks.clear();
-                } else {
-                    std::this_thread::yield();
-                }
-            } else {
-                task task_;
-                if (get_task_from_cache(task_) || steal_task_from_pool(task_)) {
-                    f_is_running = true;
+            if (get_tasks_from_cache(tasks) || steal_tasks_from_pool(tasks)) {
+                for (auto &&task_: tasks) {
                     task_();
-                    f_is_running = false;
-                } else {
-                    std::this_thread::yield();
                 }
+                tasks.clear();
+            } else {
+                std::this_thread::yield();
             }
         }
 
@@ -123,10 +91,6 @@ public:
         return m_tasks_cache.push(tasks, batch_size, (batch_size << 1));
     }
 
-    void fill_cache(task &&task_) {
-        m_tasks_cache.push(std::move(task_));
-    }
-
     void start() {
         m_thread = std::thread(&core_thread::run, this);
     }
@@ -136,14 +100,6 @@ public:
         if (m_thread.joinable()) {
             m_thread.join();
         }
-    }
-
-    bool get_flag_run() const {
-        return f_is_running;
-    }
-
-    void set_flag_batch(bool is_batch) {
-        f_is_batch = is_batch;
     }
 };
 

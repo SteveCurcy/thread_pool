@@ -15,8 +15,9 @@ using size_t = unsigned long;
 
 class config {
 public:
-    static constexpr size_t core_threads_size = 3;
-    static constexpr size_t max_tasks_size = 15;
+    static constexpr size_t core_threads_size = 2;
+    static constexpr size_t max_running_tasks_group = 15;
+    static constexpr size_t max_tasks_capacity = (max_running_tasks_group << 1);
 };
 
 #endif //THREAD_CONFIG_H
