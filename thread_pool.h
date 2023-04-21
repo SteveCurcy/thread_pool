@@ -6,9 +6,10 @@
  * @history
  *      <author>    <time>      <version>           <description>
  *      Xu.Cao      2023-04-14  0.0.2               创建了本代码
- *      Xu.Cao      2023-04-16  0.0.3               1. 修改了不安全的任务队列的使用
+ *      Xu.Cao      2023-04-16  0.0.3               修改了不安全的任务队列的使用
  *      Xu.Cao      2023-04-20  0.0.4               1. 删除批量模式控制，所有线程均批量执行，通过任务窃取实现任务的均摊
  *                                                  2. 增加了对提交任务的限制，关闭线程池不能提交任务，增强健壮性
+ *      Xu.Cao      2023-04-21  0.1.1               增加了辅助线程，当任务量过多时，逐个开启辅助线程，在任务量较少时关闭
  */
 
 #ifndef IDLE_THREAD_POOL_H
@@ -20,35 +21,59 @@
 #include <future>
 #include <functional>
 #include "core_thread.h"
+#include "auxiliary_thread.h"
 
 class thread_pool {
     safe_queue<task> m_tasks;
     std::vector<core_thread *> m_core_threads;
+    std::vector<auxiliary_thread *> m_auxiliary_threads;
     std::thread m_manager;
     bool f_is_shutdown = false;
 
     /**
-     * 将任务队列中的任务分配到核心线程中，为了尽可能的平均分配，
-     * 尝试每个核心线程分配 1/3 的任务量，如果太多则分配配置文件
-     * 设定的最大任务数
+     * 将任务队列中的任务分配到核心线程中，为每个线程分配最大容量数量的任务；
+     * 其实就是分配两倍的最大批量运行任务数量，结合任务窃取实现任务均摊
      */
     void dispatch() {
-        size_t size_for_each = config::max_running_tasks_group;
+        size_t size_for_each = config::max_tasks_capacity;
 
         for (auto *core: m_core_threads) {
             core->fill_cache(m_tasks, size_for_each);
         }
+
+        if (m_tasks.size() >= (config::max_tasks_capacity << 1)) {
+            // 查看当前任务量，使用不安全的任务队列数量，进行估计
+            // 如果当前任务分配完后还有大量的任务，则尝试开启辅助线程
+            if (m_auxiliary_threads.size() < config::max_auxiliary_threads_size) {
+                m_auxiliary_threads.emplace_back(new auxiliary_thread(&m_tasks));
+            }
+        } else if (m_tasks.size() < m_auxiliary_threads.size()) {
+            // 如果当前任务量在为核心线程分配完后都不够辅助线程竞争，
+            // 尝试减少辅助线程已减少资源消耗，一个一个的减少
+            if (!m_auxiliary_threads.empty()) {
+                auxiliary_thread *to_be_deleted = m_auxiliary_threads.back();
+                m_auxiliary_threads.pop_back();
+                delete to_be_deleted;
+            }
+        }
     }
 
     /**
-     * 管理线程，用于分配任务和指定核心线程的执行模式，批量执行还是单个执行；
-     * 这里我们发现只要超过单个线程的最大任务数量就修改为批量执行，否则为单个执行；
      * 如果线程池关闭还有任务没有完成，则继续分配任务，直到任务数量不再过多，
      * 则剩余的任务交由管理线程自己执行
      */
     void manage() {
         while (!f_is_shutdown) {
             dispatch();
+            std::this_thread::yield();
+        }
+
+        /*
+         * 由于线程池被关闭，不再允许有任务被提交，线程池进入任务的收尾阶段，
+         * 直接关闭辅助线程，将剩余的任务交由核心线程和管理线程来完成
+         */
+        for (auto *auxiliary: m_auxiliary_threads) {
+            delete auxiliary;
         }
 
         /*
@@ -115,10 +140,6 @@ public:
         f_is_shutdown = true;
 
         m_manager.join();
-
-        for (auto *core: m_core_threads) {
-            core->shutdown();
-        }
 
         for (auto *core: m_core_threads) {
             delete core;

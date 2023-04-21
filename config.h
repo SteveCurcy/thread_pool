@@ -1,7 +1,7 @@
 /*
  * @author Xu.Cao
  * @data   2023-04-14
- * @detail this is a config file to configure the thread pool
+ * @detail 这是线程池的一个配置文件
  *
  * @history
  *      <author>    <time>      <version>           <description>
@@ -12,13 +12,18 @@
 #ifndef THREAD_CONFIG_H
 #define THREAD_CONFIG_H
 
+#include <thread>
+
 using size_t = unsigned long;
 
-class config {
+class config final {
 public:
-    static constexpr size_t core_threads_size = 2;
-    static constexpr size_t max_running_tasks_group = 15;
-    static constexpr size_t max_tasks_capacity = (max_running_tasks_group << 1);
+    static constexpr size_t core_threads_size = 3;
+    static constexpr size_t max_running_tasks_size = 15;
+    static constexpr size_t max_tasks_capacity = (max_running_tasks_size << 1);
+    static const size_t max_auxiliary_threads_size;
 };
+
+const size_t config::max_auxiliary_threads_size = std::thread::hardware_concurrency() - config::core_threads_size;
 
 #endif //THREAD_CONFIG_H
