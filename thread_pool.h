@@ -10,6 +10,7 @@
  *      Xu.Cao      2023-04-20  0.0.4               1. 删除批量模式控制，所有线程均批量执行，通过任务窃取实现任务的均摊
  *                                                  2. 增加了对提交任务的限制，关闭线程池不能提交任务，增强健壮性
  *      Xu.Cao      2023-04-21  0.1.1               增加了辅助线程，当任务量过多时，逐个开启辅助线程，在任务量较少时关闭
+ *      Xu.Cao      2023-04-22  0.1.3               加入了辅助线程存活时间，当发现辅助线程持续空闲则将他们关闭
  */
 
 #ifndef IDLE_THREAD_POOL_H
@@ -28,6 +29,7 @@ class thread_pool {
     std::vector<core_thread *> m_core_threads;
     std::vector<auxiliary_thread *> m_auxiliary_threads;
     std::thread m_manager;
+    size_t c_aux_idle = 0;    // 超过 ttl 说明空闲，则回收辅助线程
     bool f_is_shutdown = false;
 
     /**
@@ -41,20 +43,30 @@ class thread_pool {
             core->fill_cache(m_tasks, size_for_each);
         }
 
+        /* 分配完任务之后，查看辅助线程的运行状态 */
+        bool is_idle_ = true;
+        for (auto *aux: m_auxiliary_threads) {
+            if (aux->get_running_flag()) {
+                is_idle_ = false;
+                break;
+            }
+        }
+        if (is_idle_) {
+            c_aux_idle++;
+        }
+
         if (m_tasks.size() >= (config::max_tasks_capacity << 1)) {
             // 查看当前任务量，使用不安全的任务队列数量，进行估计
             // 如果当前任务分配完后还有大量的任务，则尝试开启辅助线程
             if (m_auxiliary_threads.size() < config::max_auxiliary_threads_size) {
                 m_auxiliary_threads.emplace_back(new auxiliary_thread(&m_tasks));
             }
-        } else if (m_tasks.size() < m_auxiliary_threads.size()) {
-            // 如果当前任务量在为核心线程分配完后都不够辅助线程竞争，
-            // 尝试减少辅助线程已减少资源消耗，一个一个的减少
-            if (!m_auxiliary_threads.empty()) {
-                auxiliary_thread *to_be_deleted = m_auxiliary_threads.back();
-                m_auxiliary_threads.pop_back();
-                delete to_be_deleted;
+        } else if (c_aux_idle >= config::time_to_live) {
+            // 如果发现所有辅助线程都空转，说明当前已经不需要辅助线程并将它们移除
+            for (auto *aux: m_auxiliary_threads) {
+                delete aux;
             }
+            m_auxiliary_threads.clear();
         }
     }
 
@@ -75,6 +87,7 @@ class thread_pool {
         for (auto *auxiliary: m_auxiliary_threads) {
             delete auxiliary;
         }
+        m_auxiliary_threads.clear();
 
         /*
          * 到此线程池已经被结束，但是任务队列还有剩余的任务，所以还要按需求继续分配；

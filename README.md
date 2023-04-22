@@ -1,5 +1,5 @@
 # thread_pool
-[![](https://img.shields.io/badge/Author-Xu.Cao-lightgreen)](https://github.com/SteveCurcy) ![](https://img.shields.io/badge/Version-0.1.2-yellow)
+[![](https://img.shields.io/badge/Author-Xu.Cao-lightgreen)](https://github.com/SteveCurcy) ![](https://img.shields.io/badge/Version-0.1.3-yellow)
 
 基于 C++ 实现的线程池，简单但高效。（仅 637 行代码）
 
@@ -30,7 +30,7 @@
 
 本项目无需安装，只需编译运行。作者的 IDE 是 Clion，但是无论使用什么 IDE，只要在代码中引用了 `thread_pool` 头文件，都可以轻松的使用本代码。
 
-本项目提供了测试代码 `main.cpp`，目前在 3 个核心线程的情况下执行 5m 个睡眠 1us 的任务耗时低于 14s。
+本项目提供了测试代码 `main.cpp`，目前在 3 个核心线程的情况下执行 5m 个睡眠 1us 的任务耗时 12 - 13s（M2 Pro，Ventura，当其他 App 启动过多时，可能超过 13s）。
 
 ## 4. 现有问题 :sandwich:
 暂无
