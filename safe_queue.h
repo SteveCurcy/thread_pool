@@ -33,7 +33,7 @@ public:
 
     safe_queue(safe_queue &&) = delete;
 
-    size_t size() {
+    size_t size() const {
         return m_deque.size();
     }
 

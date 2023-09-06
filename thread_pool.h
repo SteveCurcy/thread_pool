@@ -21,6 +21,7 @@
 #include <thread>
 #include <future>
 #include <functional>
+#include <algorithm>
 #include "core_thread.h"
 #include "auxiliary_thread.h"
 
@@ -37,10 +38,25 @@ class thread_pool {
      * 其实就是分配两倍的最大批量运行任务数量，结合任务窃取实现任务均摊
      */
     void dispatch() {
-        size_t size_for_each = config::max_tasks_capacity;
 
+        std::vector<unsigned long> avgWorkTimes(m_core_threads.size());
+        std::vector<size_t> cacheSizes(m_core_threads.size());
+        unsigned long workTimeSum = 0;
+        size_t cacheSizeSum = 0, taskSize = m_tasks.size();
+        for (int i = 0; i < avgWorkTimes.size(); i++) {
+            avgWorkTimes[i] = m_core_threads[i]->avgTaskCost();
+            cacheSizes[i] = m_core_threads[i]->cacheSize();
+            workTimeSum += avgWorkTimes[i];
+            cacheSizeSum += cacheSizes[i];
+        }
+
+        int i = 0;
         for (auto *core: m_core_threads) {
-            core->fill_cache(m_tasks, size_for_each);
+            size_t propSize = std::min(size_t(1.0 * (workTimeSum - avgWorkTimes[i]) / workTimeSum * 
+                            cacheSizes[i] / cacheSizeSum * taskSize),
+                            config::max_tasks_capacity - cacheSizes[i]);
+            core->fill_cache(m_tasks, propSize);
+            i++;
         }
 
         /* 分配完任务之后，查看辅助线程的运行状态 */
@@ -151,7 +167,6 @@ public:
      */
     void shutdown() {
         f_is_shutdown = true;
-
         m_manager.join();
 
         for (auto *core: m_core_threads) {

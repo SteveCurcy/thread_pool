@@ -12,12 +12,21 @@
 #define THREAD_POOL_THREAD_BASE_H
 
 #include <thread>
+#include <chrono>
+#include <atomic>
 
 class thread_base {
+public:
+    static constexpr int STAT_SHUT = 0;
+    static constexpr int STAT_IDLE = 1;
+    static constexpr int STAT_RUN = 2;
 protected:
     std::thread m_thread;
     bool f_is_shutdown = false;
     bool f_is_running = false;
+
+    std::atomic_int _F_status{STAT_RUN};
+    std::atomic_ulong _M_avgWorkTime{1};   // unit us
 
     virtual void run() = 0;
 
@@ -25,7 +34,7 @@ public:
     thread_base() = default;
 
     ~thread_base() {
-        if (!f_is_shutdown) {
+        if (_F_status.load(std::memory_order::memory_order_acquire)) {
             shutdown();
         }
     }
@@ -35,14 +44,22 @@ public:
     }
 
     void shutdown() {
-        f_is_shutdown = true;
+        _F_status.store(STAT_SHUT, std::memory_order::memory_order_consume);
         if (m_thread.joinable()) {
             m_thread.join();
         }
     }
 
+    unsigned long avgTaskCost() const {
+        return _M_avgWorkTime;
+    }
+
     bool get_running_flag() const {
         return f_is_running;
+    }
+
+    int getStatus() const {
+        return _F_status.load(std::memory_order::memory_order_acquire);
     }
 };
 

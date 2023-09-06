@@ -14,6 +14,7 @@
 #define THREAD_CONFIG_H
 
 #include <thread>
+#include <algorithm>
 
 using size_t = unsigned long;
 
@@ -26,6 +27,6 @@ public:
     static const size_t max_auxiliary_threads_size;
 };
 
-const size_t config::max_auxiliary_threads_size = std::thread::hardware_concurrency() - config::core_threads_size;
+const size_t config::max_auxiliary_threads_size = std::thread::hardware_concurrency() > 3 ? std::thread::hardware_concurrency() - config::core_threads_size: 3;
 
 #endif //THREAD_CONFIG_H

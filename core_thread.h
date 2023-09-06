@@ -18,6 +18,7 @@
 
 #include <vector>
 #include <queue>
+#include <algorithm>
 #include "task.h"
 #include "config.h"
 #include "safe_queue.h"
@@ -53,16 +54,34 @@ class core_thread: public thread_base {
             throw std::runtime_error("Init error: core thread pointer is null!");
         }
 
+
         std::vector<task> tasks;
-        while (!f_is_shutdown) {
+        while (_F_status.load(std::memory_order::memory_order_acquire)) {
+            unsigned long tmpAvgWorkTime = 0;
+            unsigned long taskNum = 0;
             if (get_tasks_from_cache(tasks) || steal_tasks_from_pool(tasks)) {
+                auto oldStatus = _F_status.exchange(STAT_RUN, std::memory_order::memory_order_acq_rel);
+                taskNum = tasks.size();
                 for (auto &&task_: tasks) {
-                    f_is_running = true;
+                    auto startTime = std::chrono::system_clock::now();
                     task_();
-                    f_is_running = false;
+                    tmpAvgWorkTime += std::chrono::duration_cast<std::chrono::microseconds>(
+                                    std::chrono::system_clock::now() - startTime).count();
                 }
                 tasks.clear();
+
+                /* 计算平均工作时长 */
+                _M_avgWorkTime = 0.3 * _M_avgWorkTime.load(std::memory_order::memory_order_acquire)
+                                 + 0.7 * tmpAvgWorkTime / taskNum;
+
+                if (oldStatus == STAT_SHUT) {
+                    _F_status.store(STAT_SHUT, std::memory_order::memory_order_release);
+                }
             } else {
+                auto oldStatus = _F_status.exchange(STAT_IDLE, std::memory_order::memory_order_acq_rel);
+                if (oldStatus == STAT_SHUT) {
+                    _F_status.store(STAT_SHUT, std::memory_order::memory_order_release);
+                }
                 std::this_thread::yield();
             }
         }
@@ -80,13 +99,17 @@ public:
     explicit core_thread(std::vector<core_thread *> &cores) : core_pool_threads(cores) {}
 
     ~core_thread() {
-        if (!f_is_shutdown) {
+        if (_F_status.load(std::memory_order::memory_order_acquire)) {
             shutdown();
         }
     }
 
     size_t fill_cache(safe_queue<task> &tasks, size_t batch_size) {
         return m_tasks_cache.push(tasks, batch_size, (batch_size << 1));
+    }
+
+    size_t cacheSize() const {
+        return config::max_running_tasks_size - m_tasks_cache.size();
     }
 };
 

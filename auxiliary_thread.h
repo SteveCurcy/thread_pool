@@ -22,15 +22,21 @@ class auxiliary_thread: public thread_base {
 
     void run() override {
         std::vector<task> tasks;
-        while (!f_is_shutdown) {
+        while (_F_status.load(std::memory_order::memory_order_acquire)) {
             if (m_tasks->pop_front(tasks, config::max_running_tasks_size) > 0) {
+                auto oldStatus = _F_status.exchange(STAT_RUN, std::memory_order::memory_order_acq_rel);
                 for (task &task_: tasks) {
-                    f_is_running = true;
                     task_();
-                    f_is_running = false;
                 }
                 tasks.clear();
+                if (oldStatus == STAT_SHUT) {
+                    _F_status.store(STAT_SHUT, std::memory_order::memory_order_release);
+                }
             } else {
+                auto oldStatus = _F_status.exchange(STAT_RUN, std::memory_order::memory_order_acq_rel);
+                if (oldStatus == STAT_SHUT) {
+                    _F_status.store(STAT_SHUT, std::memory_order::memory_order_release);
+                }
                 std::this_thread::yield();
             }
         }
@@ -41,7 +47,7 @@ public:
     }
 
     ~auxiliary_thread() {
-        if (!f_is_shutdown) {
+        if (_F_status.load(std::memory_order::memory_order_acquire)) {
             shutdown();
         }
     }
