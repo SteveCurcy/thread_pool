@@ -62,12 +62,16 @@ class core_thread: public thread_base {
             if (get_tasks_from_cache(tasks) || steal_tasks_from_pool(tasks)) {
                 auto oldStatus = _F_status.exchange(STAT_RUN, std::memory_order::memory_order_acq_rel);
                 taskNum = tasks.size();
+                auto startTime = std::chrono::system_clock::now();
                 for (auto &&task_: tasks) {
-                    auto startTime = std::chrono::system_clock::now();
-                    task_();
-                    tmpAvgWorkTime += std::chrono::duration_cast<std::chrono::microseconds>(
-                                    std::chrono::system_clock::now() - startTime).count();
+                    // try {
+                        task_();
+                    // } catch(...) {
+                    //     // do nothing now
+                    // }
                 }
+                tmpAvgWorkTime += std::chrono::duration_cast<std::chrono::microseconds>(
+                                std::chrono::system_clock::now() - startTime).count();
                 tasks.clear();
 
                 /* 计算平均工作时长 */

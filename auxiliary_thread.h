@@ -33,7 +33,7 @@ class auxiliary_thread: public thread_base {
                     _F_status.store(STAT_SHUT, std::memory_order::memory_order_release);
                 }
             } else {
-                auto oldStatus = _F_status.exchange(STAT_RUN, std::memory_order::memory_order_acq_rel);
+                auto oldStatus = _F_status.exchange(STAT_IDLE, std::memory_order::memory_order_acq_rel);
                 if (oldStatus == STAT_SHUT) {
                     _F_status.store(STAT_SHUT, std::memory_order::memory_order_release);
                 }

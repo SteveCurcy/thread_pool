@@ -62,7 +62,7 @@ class thread_pool {
         /* 分配完任务之后，查看辅助线程的运行状态 */
         bool is_idle_ = true;
         for (auto *aux: m_auxiliary_threads) {
-            if (aux->get_running_flag()) {
+            if (aux->getStatus() == thread_base::STAT_RUN) {
                 is_idle_ = false;
                 break;
             }

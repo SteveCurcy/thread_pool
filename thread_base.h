@@ -22,8 +22,8 @@ public:
     static constexpr int STAT_RUN = 2;
 protected:
     std::thread m_thread;
-    bool f_is_shutdown = false;
-    bool f_is_running = false;
+    // bool f_is_shutdown = false;
+    // bool f_is_running = false;
 
     std::atomic_int _F_status{STAT_RUN};
     std::atomic_ulong _M_avgWorkTime{1};   // unit us
@@ -54,9 +54,9 @@ public:
         return _M_avgWorkTime;
     }
 
-    bool get_running_flag() const {
-        return f_is_running;
-    }
+    // bool get_running_flag() const {
+    //     return f_is_running;
+    // }
 
     int getStatus() const {
         return _F_status.load(std::memory_order::memory_order_acquire);
