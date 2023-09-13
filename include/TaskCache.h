@@ -46,8 +46,8 @@ public:
 
     /* 提交一个任务，找一个任务量最少的队列添加进去 */
     template<typename F, typename... Args>
-    std::future<typename std::result_of<F()>::type> submitNonBlock(F&& f, Args&&... args) {
-        using result_type = typename std::result_of<F()>::type;
+    std::future<typename std::result_of<F(Args...)>::type> submitNonBlock(F&& f, Args&&... args) {
+        using result_type = typename std::result_of<F(Args...)>::type;
         std::packaged_task<result_type()> task_(std::bind(std::forward<F>(f),
                                                             std::forward<Args>(args)...));
         std::future<result_type> ret(task_.get_future()), dummy;
@@ -63,7 +63,7 @@ public:
                 minTask = taskNr;
             }
         }
-        if (!_M_queues[propQueId]->push(std::move(task_))) return dummy;
+        if (!_M_queues[propQueId]->push(Task(std::move(task_)))) return dummy;
         return ret;
     }
 };

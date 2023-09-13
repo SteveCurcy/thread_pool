@@ -3,7 +3,7 @@
 #include <iostream>
 using namespace std;
 
-void print() { cout << 1 << endl; }
+void print(int a) { cout << a << endl; }
 
 int main() {
     Thread threads[10];
@@ -12,7 +12,7 @@ int main() {
         threads[i].start(taskCache.getQueuePtr());
     }
     for (int i = 0; i < 10000; i++) {
-        while (!taskCache.submitNonBlock(print).valid()) this_thread::yield();
+        while (!taskCache.submitNonBlock(print, i).valid()) this_thread::yield();
     }
     return 0;
 }
