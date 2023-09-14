@@ -48,16 +48,16 @@ public:
     template<typename F>
     explicit Task(F &&f) : impl(new impl_type<F>(std::forward<F>(f))) {}
 
-    Task() = default;
+    Task(): impl(nullptr) {};
 
-    Task(const Task &other) noexcept = default;
-    Task(Task &&other) noexcept = default;
+    Task(const Task &other): impl(other.impl) {}
+    Task(Task &&other): impl(std::move(other.impl)) {}
 
     Task& operator=(const Task& other) noexcept = default;
     Task& operator=(Task&& other) noexcept = default;
 
     void operator()() {
-        if (impl != nullptr) {
+        if (impl.use_count()) {
             impl->call();
         }
     }

@@ -34,8 +34,12 @@ public:
     typedef TaskCache self;
 private:
     std::vector<QueuePtr> _M_queues;
+    int _M_nexQueId;
+    int _M_queueNr;
 public:
-    TaskCache(int queueNr = DEFAULT_QUEUE_NR): _M_queues(queueNr, nullptr) {
+    TaskCache(int queueNr = DEFAULT_QUEUE_NR):
+        _M_queues(queueNr, nullptr), _M_nexQueId(0),
+        _M_queueNr(queueNr) {
         for (auto& ptr: _M_queues) {
             ptr.reset(new DLFQueue);
         }
@@ -52,18 +56,10 @@ public:
                                                             std::forward<Args>(args)...));
         std::future<result_type> ret(task_.get_future()), dummy;
 
-        int propQueId = 0, cnt = 0;
-        int minTask = 9999;
-        for (auto& elem: _M_queues) {
-            /* 这里引用数量为 1，是 TaskCache 成员变量本身的引用 */
-            if (elem.use_count() <= 1) continue;
-            auto taskNr = elem->size();
-            if (taskNr < minTask) {
-                propQueId = cnt;
-                minTask = taskNr;
-            }
-        }
-        if (!_M_queues[propQueId]->push(Task(std::move(task_)))) return dummy;
+        Task task(std::move(task_));
+        while (_M_queues[_M_nexQueId].use_count() == 1) _M_nexQueId = (_M_nexQueId + 1) % _M_queueNr;
+        if (!_M_queues[_M_nexQueId]->push(&task)) return dummy;
+        _M_nexQueId = (_M_nexQueId + 1) % _M_queueNr;
         return ret;
     }
 };
