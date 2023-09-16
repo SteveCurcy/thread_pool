@@ -45,8 +45,8 @@ void pop(int id) {
 int main() {
     thread t[20];
     for (int i = 0; i < 20; i++) {
-        if (i < 10) t[i] = std::move(thread(push));
-        else t[i] = std::move(thread(pop, i - 10));
+        if (i < 10) t[i] = thread(push);
+        else t[i] = thread(pop, i - 10);
     }
     for (int i = 0; i < 20; i++) {
         t[i].join();
