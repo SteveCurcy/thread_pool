@@ -38,7 +38,7 @@ void pop(int id) {
             x[i]();
         }
         popd += nr;
-        cout << "thread " << id << " pushd and popd: " << pushd << ", " << popd << endl;
+        // cout << "thread " << id << " pushd and popd: " << pushd << ", " << popd << endl;
     }
 }
 
@@ -51,6 +51,10 @@ int main() {
     for (int i = 0; i < 20; i++) {
         t[i].join();
     }
-    // printf("%d\n", cnt.load(std::memory_order::memory_order_consume));
+    if (pushd.load(memory_order::memory_order_consume)
+     == popd.load(memory_order::memory_order_consume))
+        printf("\033[32m[SUCCESS]\033[0m %d tasks finished...\n", pushd.load());
+    else
+        printf("\033[31m[ERROR]\033[0m %d tasks missed...\n", pushd - popd);
     return 0;
 }

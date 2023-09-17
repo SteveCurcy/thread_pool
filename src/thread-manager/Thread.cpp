@@ -12,7 +12,7 @@ bool Thread::mono() {
 
 bool Thread::batch() {
     std::vector<Task> tasks(_M_batchSize);
-    int ret = _M_queue->pop((Task*)(&tasks), _M_batchSize);
+    int ret = _M_queue->pop(&tasks[0], _M_batchSize);
     if (ret) {
         for (int i = 0; i < ret; i++) {
             tasks[i]();
