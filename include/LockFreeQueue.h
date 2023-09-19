@@ -21,12 +21,16 @@ class LockFreeQueue final {
                       _M_writeable, // 最后一个可写元素的下一个位置
                       _M_size;      // 队列中的元素数量
     size_t _M_allocSize;
+    std::atomic_ulong _M_pushd;     // 存储当前时间段内添加的元素数量
+    std::atomic_ulong _M_popd;      // 存储当前时间段内取出的元素数量
 public:
     LockFreeQueue(size_t _size = LOCK_FREE_QUEUE_DEFAULT_SIZE): _M_allocSize(_size) {
         _M_read = 0;
         _M_write = 0;
         _M_readable = 0;
         _M_writeable = 0;
+        _M_pushd = 0;
+        _M_popd = 0;
         _M_queue = new _TyData[_size];
     }
     virtual ~LockFreeQueue() { delete[] _M_queue; }
@@ -34,6 +38,14 @@ public:
     size_t push(const _TyData* elems, size_t nr);
 
     size_t pop(_TyData* elems, size_t nr);
+
+    size_t getPushd() { // 返回当前添加的元素数量，并将当前值置 0
+        return _M_pushd.exchange(0, std::memory_order::memory_order_acq_rel);
+    }
+
+    size_t getPopd() {  // 返回当前取出的元素数量，并将当前值置 0
+        return _M_popd.exchange(0, std::memory_order::memory_order_acq_rel);
+    }
 
     size_t index(size_t pos) const { return pos % _M_allocSize; }
 
@@ -89,6 +101,7 @@ size_t LockFreeQueue<_TyData>::push(const _TyData* elems, size_t nr) {
     }
 
     _M_size += actualNr;
+    _M_pushd += actualNr;
     return actualNr;
 }
 
@@ -125,6 +138,7 @@ size_t LockFreeQueue<_TyData>::pop(_TyData* elems, size_t nr) {
     }
 
     _M_size -= actualNr;
+    _M_popd += actualNr;
     return actualNr;
 }
 
@@ -155,6 +169,10 @@ public:
     size_t push(const _TyData* elems, size_t nr = 1) { return writePtr->push(elems, nr); }
 
     size_t pop(_TyData* elems, size_t nr = 1) { return readPtr->pop(elems, nr); }
+
+    size_t getPushd() { return writePtr->getPushd(); }
+
+    size_t getPopd() { return readPtr->getPopd(); }
 
     /*
      * 这个函数只能由控制者使用，其他线程不能调用

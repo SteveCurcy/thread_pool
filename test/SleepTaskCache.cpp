@@ -33,8 +33,18 @@ void epoch(int nr) {
 }
 
 int main(int argc, char* argv[]) {
-    int nr = 500000;
+    int nr = 50000;
     if (argc > 1) nr = atoi(argv[1]);
     epoch(nr);
+    printf("[TEST] %d tasks run in one thread...\n", nr);
+    auto start = chrono::steady_clock::now();
+    for (int i = 0; i < nr; i++) {
+        print(0);
+    }
+    auto cost = chrono::duration_cast<chrono::milliseconds>(
+        chrono::steady_clock::now() - start).count();
+    cout << nr << " tasks cost " << cost << "ms" << endl;
+    cout << "TPS (Tasks/s) is " << 1000 * nr / cost << endl;
+    printf("[TEST] tasks finished in one thread...\n");
     return 0;
 }
