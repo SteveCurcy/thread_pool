@@ -1,5 +1,5 @@
-#ifndef LOCK_FREE_QUEUQ_H
-#define LOCK_FREE_QUEUQ_H
+#ifndef QUEUQ_H
+#define QUEUQ_H
 
 #include <sys/types.h>
 #include <atomic>
@@ -7,13 +7,26 @@
 #include <vector>
 #include <algorithm>
 
-constexpr size_t LOCK_FREE_QUEUE_DEFAULT_SIZE = 1000;
+constexpr size_t QUEUE_DEFAULT_SIZE = 1000;
+
+/* 线程安全队列，提供一个队列的接口 */
+template<typename _TyData>
+class Queue {
+public:
+    virtual ~Queue() {};
+    virtual size_t push(const _TyData*, size_t) = 0;
+    virtual size_t pop(_TyData*, size_t) = 0;
+    virtual size_t size() const = 0;
+    virtual size_t capacity() const = 0;
+    virtual bool empty() const = 0;
+};
+
 /**
  * 当前的类是一个环形队列，可以看作一个 ringbuffer，其长度在初始化时固定；
  * 申请空间大小不可改变，因此是定长的队列，通过 CAS 机制保证其无锁操作
  */
 template<typename _TyData>
-class LockFreeQueue final {
+class LockFreeQueue final: public Queue<_TyData> {
     _TyData *_M_queue;
     std::atomic_ulong _M_read,      // 下一个可读性的位置
                       _M_readable,  // 最后一个可读元素的下一个位置
@@ -21,51 +34,32 @@ class LockFreeQueue final {
                       _M_writeable, // 最后一个可写元素的下一个位置
                       _M_size;      // 队列中的元素数量
     size_t _M_allocSize;
-    std::atomic_ulong _M_pushd;     // 存储当前时间段内添加的元素数量
-    std::atomic_ulong _M_popd;      // 存储当前时间段内取出的元素数量
+    size_t index(size_t pos) const { return pos % _M_allocSize; }
+    size_t diff(size_t pre, size_t post) { return (post + _M_allocSize - pre) % _M_allocSize; }
 public:
-    LockFreeQueue(size_t _size = LOCK_FREE_QUEUE_DEFAULT_SIZE): _M_allocSize(_size) {
+    LockFreeQueue(size_t _size = QUEUE_DEFAULT_SIZE): _M_allocSize(_size) {
         _M_read = 0;
         _M_write = 0;
         _M_readable = 0;
         _M_writeable = 0;
-        _M_pushd = 0;
-        _M_popd = 0;
         _M_queue = new _TyData[_size];
     }
     virtual ~LockFreeQueue() { delete[] _M_queue; }
 
-    size_t push(const _TyData* elems, size_t nr);
+    size_t push(const _TyData* elems, size_t nr) override;
 
-    size_t pop(_TyData* elems, size_t nr);
+    size_t pop(_TyData* elems, size_t nr) override;
 
-    size_t getPushd() { // 返回当前添加的元素数量，并将当前值置 0
-        return _M_pushd.exchange(0, std::memory_order::memory_order_acq_rel);
-    }
-
-    size_t getPopd() {  // 返回当前取出的元素数量，并将当前值置 0
-        return _M_popd.exchange(0, std::memory_order::memory_order_acq_rel);
-    }
-
-    size_t index(size_t pos) const { return pos % _M_allocSize; }
-
-    size_t diff(size_t pre, size_t post) { return (post + _M_allocSize - pre) % _M_allocSize; }
-
-    inline bool full() const {
-        return _M_write.load(std::memory_order::memory_order_consume)
-        == index(_M_writeable.load(std::memory_order::memory_order_consume) - 1);
-    }
-
-    inline bool empty() const {
+    bool empty() const override {
         return _M_read.load(std::memory_order::memory_order_consume)
         == _M_readable.load(std::memory_order::memory_order_consume);
     }
 
-    inline size_t size() const {
+    size_t size() const override {
         return _M_size.load(std::memory_order::memory_order_consume);
     }
 
-    inline size_t capicity() const { return _M_allocSize; }
+    size_t capacity() const override { return _M_allocSize; }
 };
 
 template<typename _TyData>
@@ -101,7 +95,6 @@ size_t LockFreeQueue<_TyData>::push(const _TyData* elems, size_t nr) {
     }
 
     _M_size += actualNr;
-    _M_pushd += actualNr;
     return actualNr;
 }
 
@@ -138,41 +131,34 @@ size_t LockFreeQueue<_TyData>::pop(_TyData* elems, size_t nr) {
     }
 
     _M_size -= actualNr;
-    _M_popd += actualNr;
     return actualNr;
 }
 
 /**
- * 变长无锁队列，当需要扩容队列的时候，申请一个新的静态无锁队列；
+ * 变长队列，当需要扩容队列的时候，申请一个新的定长队列；
  * 然后将写任务指向新队列，而原队列只负责读；
- * 当读队列空时，完成最终的指针修正
+ * 当读队列空时，完成最终的指针修正，你可以选择定长队列的基础实现
  */
-template<typename _TyData>
-class DynamicLockFreeQueue final {
-    LockFreeQueue<_TyData> *curPtr,
-                           *newPtr;
-    LockFreeQueue<_TyData> *readPtr,
-                           *writePtr;
+template<typename _TyData, typename _BaseQueue=LockFreeQueue<_TyData>>
+class DynamicQueue final: public Queue<_TyData> {
+    _BaseQueue *curPtr, *newPtr,
+               *readPtr, *writePtr;
 public:
-    DynamicLockFreeQueue(size_t _size = LOCK_FREE_QUEUE_DEFAULT_SIZE):
-                         curPtr(new LockFreeQueue<_TyData>(_size)),
-                         newPtr(nullptr) {
+    DynamicQueue(size_t _size = QUEUE_DEFAULT_SIZE):
+                 curPtr(new _BaseQueue(_size)),
+                 newPtr(nullptr) {
         readPtr = curPtr;
         writePtr = curPtr;
     }
-    ~DynamicLockFreeQueue() {
+    ~DynamicQueue() {
         readPtr = writePtr = nullptr;
         delete curPtr;
         delete newPtr;
     }
 
-    size_t push(const _TyData* elems, size_t nr = 1) { return writePtr->push(elems, nr); }
+    size_t push(const _TyData* elems, size_t nr = 1) override { return writePtr->push(elems, nr); }
 
-    size_t pop(_TyData* elems, size_t nr = 1) { return readPtr->pop(elems, nr); }
-
-    size_t getPushd() { return writePtr->getPushd(); }
-
-    size_t getPopd() { return readPtr->getPopd(); }
+    size_t pop(_TyData* elems, size_t nr = 1) override { return readPtr->pop(elems, nr); }
 
     /*
      * 这个函数只能由控制者使用，其他线程不能调用
@@ -197,13 +183,11 @@ public:
         return true;
     }
 
-    inline bool full() const { return curPtr->size(); }
+    bool empty() const override { return curPtr->size(); }
 
-    inline bool empty() const { return curPtr->size(); }
+    size_t size() const override { return curPtr->size(); }
 
-    inline size_t size() const { return curPtr->size(); }
-
-    inline size_t capicity() const { return curPtr->capicity(); }
+    size_t capacity() const override { return curPtr->capacity(); }
 };
 
 #endif

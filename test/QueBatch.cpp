@@ -1,10 +1,10 @@
-#include "LockFreeQueue.h"
+#include "Queue.h"
 #include "Task.h"
 #include <iostream>
 #include <functional>
 #include <thread>
 using namespace std;
-DynamicLockFreeQueue<Task> que;
+DynamicQueue<Task> que;
 atomic_int pushd{0}, popd{0};
 
 void func(int a) {}

@@ -28,17 +28,8 @@ class Task {
             f();
         }
     };
-
-    /**
-     * 这里将原来的 unique_ptr 改为了 shared_ptr，在使用的时候需要注意不要循环引用；
-     * 如果使用 unique_ptr 将导致对于 task 结构体的复制、赋值等操作必须使用移动语义；
-     * 这不仅降低了代码的灵活性，而且容易产生代码错误，且 bug 不易排查，因此这里改用了
-     * 安全性相对较低的 shared_ptr 以提升代码的灵活性和可用性；
-     * 
-     * 此外，虽然移动语义能在某种情况下能提升代码性能，但是要求在**大规模**无意义的
-     * 拷贝情况下最好使用移动语义，但是对于简单类型的拷贝，建议不要滥用 move，实测性能无差别
-     */
-    std::shared_ptr<impl_base> impl;
+    
+    std::unique_ptr<impl_base> impl;
 public:
     /**
      * 接收一个 std::packaged_task 类型的参数，将其包装依靠多态执行
@@ -50,14 +41,21 @@ public:
 
     Task(): impl(nullptr) {};
 
-    Task(const Task &other): impl(other.impl) {}
+    Task(const Task &other) {
+        Task& otherTask = const_cast<Task&>(other);
+        impl = std::move(otherTask.impl);
+    }
     Task(Task &&other): impl(std::move(other.impl)) {}
 
-    Task& operator=(const Task& other) noexcept = default;
+    Task& operator=(const Task& other) noexcept {
+        Task& otherTask = const_cast<Task&>(other);
+        impl = std::move(otherTask.impl);
+        return *this;
+    }
     Task& operator=(Task&& other) noexcept = default;
 
     void operator()() {
-        if (impl.use_count()) {
+        if (impl) {
             impl->call();
         }
     }
