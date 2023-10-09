@@ -28,6 +28,7 @@ public:
 template<typename _TyData>
 class LockFreeQueue final: public Queue<_TyData> {
     _TyData *_M_queue;
+    alignas(8)
     std::atomic_ulong _M_read,      // 下一个可读性的位置
                       _M_readable,  // 最后一个可读元素的下一个位置
                       _M_write,     // 下一个可以写入的位置
