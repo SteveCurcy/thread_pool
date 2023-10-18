@@ -184,7 +184,7 @@ public:
         return true;
     }
 
-    bool empty() const override { return curPtr->size(); }
+    bool empty() const override { return curPtr->empty(); }
 
     size_t size() const override { return curPtr->size(); }
 

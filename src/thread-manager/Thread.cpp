@@ -58,7 +58,8 @@ bool ThreadManager::addThread(const Strategy& strategy, bool isCore) {
     
     Thread *t = new Thread(this, defaultStrategy, isCore);
     auto id = t->getId();
-    _M_threads.emplace(id, t);
+    if (isCore) _M_cores.emplace(id, t);
+    else _M_threads.emplace(id, t);
     _M_status++;
     return true;
 }
@@ -76,6 +77,12 @@ ThreadManager::~ThreadManager() {
     while (!_M_tasks.empty()) {
         std::this_thread::yield();
     }
+    /* 手动关闭所有线程，防止程序还在执行导致的程序错误；
+     * 因为，线程的销毁和队列的销毁是无法确定的，所以应该
+     * 手动关闭来确保线程不会访问已经销毁的队列 */
+    for (auto& t: _M_threads) t.second->shutdown();
+    for (auto& t: _M_cores) t.second->shutdown();
+    printf("ThreadManager destruction: %lu tasks left.\n", _M_tasks.size());
 }
 
 size_t defaultStrategy(const Thread& thrd, ThreadManager& thrdMngr) {

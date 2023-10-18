@@ -43,7 +43,7 @@ constexpr int POOL_STATUS_OFFSET = 28;
 constexpr PoolStatus POOL_STATUS_MASK = ((1 << (POOL_STATUS_SIZE - POOL_STATUS_OFFSET)) - 1) << POOL_STATUS_OFFSET;
 constexpr PoolStatus POOL_COUNT_MASK = (1 << POOL_STATUS_OFFSET) - 1;
 /* 线程最大空闲轮数 */
-constexpr int MAX_IDLE_TIME = 10;
+constexpr int MAX_IDLE_TIME = 100;
 /* 核心线程最大支撑的任务数量 */
 constexpr int MAX_CORE_LOAD = 5;
 
@@ -156,21 +156,22 @@ public:
     std::future<typename std::result_of<F(Args)...>::type> submit(F &&f, Args &&...args) {
 
         using result_type = typename std::result_of<F(Args)...>::type;
-        std::packaged_task<result_type()> task_(std::bind(std::forward<F>(f),
-                                                          std::forward<Args>(args)...));
+        std::packaged_task<result_type()> task_ = std::packaged_task<result_type()>(
+                                                    std::bind(std::forward<F>(f),
+                                                    std::forward<Args>(args)...));
         std::future<result_type> res(task_.get_future());
 
         Task task(std::move(task_));
         std::future<result_type> dummy;
 
         if (_M_cores.size() < _M_coreSize) {
-            addThread(defaultStrategy, true);
-            _M_tasks.push(&task);
+            if (!addThread(defaultStrategy, true)) return dummy;
+            if (!_M_tasks.push(&task)) return dummy;
         } else if (_M_tasks.size() + 1 < _M_tasks.capacity()) {
-            _M_tasks.push(&task);
+            if (!_M_tasks.push(&task)) return dummy;
         } else if (_M_tasks.size() + 1 == _M_tasks.capacity() && _M_cores.size() + _M_threads.size() < _M_poolSize) {
-            addThread(defaultStrategy, false);
-            _M_tasks.push(&task);
+            if (!addThread(defaultStrategy, false)) return dummy;
+            if (!_M_tasks.push(&task)) return dummy;
         } else {
             return dummy;
         }

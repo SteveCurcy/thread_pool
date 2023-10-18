@@ -6,58 +6,77 @@
 #include <utility>
 
 /**
- * 这个类将用来封装函数，防止出现 bad_function_call 错误。
- * 目标函数将是 std::packaged_task，因此只能移动赋值
+ * Task 类提供一个对任务的包装，允许存在空任务。
+ * - 默认构造函数应该生成一个空任务，空任务的调用不会做任何事；
+ * - 任务应该支持赋值和拷贝操作，但是一个任务只能由一个实例持有。
+ *   如 Task a = b，则变量 b 失去对任务的所有权，而 a 获得。
+ * 任务在最终将自动销毁，在析构函数中应该注意任务的释放。
  */
 class Task {
-    struct impl_base {
+    /* 提供一个接口，可以调用执行，可以通过多态完成析构 */
+    struct task_base {
         virtual void call() = 0;
-        virtual ~impl_base() = default;
+        virtual ~task_base() = default;
     };
 
-    template<typename F>
-    struct impl_type : impl_base {
-        F f;
+    template<typename PT>
+    struct task_impl : task_base {
+        PT pt;  // 一个 packaged_task，可以用于执行等
 
-        explicit impl_type(F &&f_) : f(std::move(f_)) {}
+        /* packaged_task 只能通过右值引用来传递 */
+        explicit task_impl(PT &&_pt) : pt(std::move(_pt)) {}
+        ~task_impl() = default;
 
-        impl_type(const impl_type<F> &other) noexcept = delete;
-        impl_type(impl_type<F> &&other) noexcept = default;
+        /* 任务的实现不允许拷贝和移动，只能通过指针转移所有权 */
+        task_impl(const task_impl<PT> &other) noexcept = delete;
+        task_impl(task_impl<PT> &&other) noexcept = delete;
 
         void call() override {
-            f();
+            /* 确保当前的任务是合法的，不合法的则不予执行；
+             * 默认构造函数得到的任务是非法的 */
+            if (pt.valid()) pt();
         }
     };
     
-    std::unique_ptr<impl_base> impl;
+    task_base* impl;
 public:
     /**
      * 接收一个 std::packaged_task 类型的参数，将其包装依靠多态执行
-     * @tparam F 具体任务类型，std::packaged_task<T>，只能移动拷贝
-     * @param f 实际的任务，只能移动传参
+     * @tparam PT 具体任务类型，std::packaged_task<T>，只能移动拷贝
+     * @param _pt 实际的任务，只能移动传参
      */
-    template<typename F>
-    explicit Task(F &&f) : impl(new impl_type<F>(std::forward<F>(f))) {}
+    template<typename PT>
+    explicit Task(PT &&_pt) : impl(new task_impl<PT>(std::forward<PT>(_pt))) {}
 
     Task(): impl(nullptr) {};
 
+    ~Task() { delete impl; }
+
     Task(const Task &other) {
         Task& otherTask = const_cast<Task&>(other);
-        impl = std::move(otherTask.impl);
+        impl = otherTask.impl;
+        otherTask.impl = nullptr;
     }
-    Task(Task &&other): impl(std::move(other.impl)) {}
+    Task(Task &&other): impl(other.impl) {
+        other.impl = nullptr;
+    }
 
     Task& operator=(const Task& other) noexcept {
         Task& otherTask = const_cast<Task&>(other);
-        impl = std::move(otherTask.impl);
+        delete impl;
+        impl = otherTask.impl;
+        otherTask.impl = nullptr;
         return *this;
     }
-    Task& operator=(Task&& other) noexcept = default;
+    Task& operator=(Task&& other) {
+        delete impl;
+        impl = other.impl;
+        other.impl = nullptr;
+        return *this;
+    }
 
     void operator()() {
-        if (impl) {
-            impl->call();
-        }
+        if (impl) impl->call();
     }
 };
 
