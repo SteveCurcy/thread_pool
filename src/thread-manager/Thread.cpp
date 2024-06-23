@@ -54,8 +54,9 @@ void Thread::start()
 
 void Thread::pause()
 {
-    int expectStatus = _M_status.load();
-    if (expectStatus == THREAD_RUNNING)
+    int expectStatus = _M_status;
+    if (expectStatus == THREAD_PAUSE ||
+        expectStatus == THREAD_TERMINATED)
         return;
     _M_status.compare_exchange_strong(
         expectStatus, THREAD_PAUSE,
@@ -64,13 +65,14 @@ void Thread::pause()
 
 void Thread::resume()
 {
-    int expectStatus = THREAD_PAUSE;
+    int expectStatus = _M_status;
+    if (expectStatus != THREAD_PAUSE ||
+        expectStatus != THREAD_CREATED)
+        return;
     if (_M_status.compare_exchange_strong(
             expectStatus, THREAD_RUNNING,
             std::memory_order_acq_rel))
     {
-        // 只有从 CREATED 状态到 RUNNING 状态
-        // 才允许真正开始工作
         _M_cond.notify_one();
     }
 }
@@ -99,6 +101,94 @@ void Thread::shutdown()
         if (_M_thread->joinable())
         {
             _M_thread->join();
+        }
+    }
+}
+
+const int ThreadManager::coreNr = std::thread::hardware_concurrency();
+
+ThreadManager::~ThreadManager()
+{
+    shutdown();
+}
+
+void ThreadManager::start()
+{
+    int expectStatus = POOL_CREATED;
+    if (_M_status.compare_exchange_strong(
+            expectStatus, POOL_RUNNING,
+            std::memory_order_acq_rel))
+    {
+        // 只有从 CREATED 状态到 RUNNING 状态
+        // 才允许真正开始工作
+        _M_activeNr.store(std::max(2, coreNr),
+                          std::memory_order_release);
+        for (int i = 0; i < _M_activeNr; i++)
+        {
+            _M_threads[i].start();
+        }
+    }
+}
+
+void ThreadManager::pause()
+{
+    int expectStatus = _M_status;
+    if (expectStatus == POOL_PAUSE ||
+        expectStatus == POOL_TERMINATED)
+        return;
+    if (_M_status.compare_exchange_strong(
+            expectStatus, POOL_PAUSE,
+            std::memory_order_acq_rel))
+    {
+        // 如果状态更新成功，则将所有线程都暂停
+        for (int i = 0; i < _M_activeNr; i++)
+        {
+            _M_threads[i].pause();
+        }
+    }
+}
+
+void ThreadManager::resume()
+{
+    int expectStatus = POOL_PAUSE;
+    if (_M_status.compare_exchange_strong(
+            expectStatus, POOL_RUNNING,
+            std::memory_order_acq_rel))
+    {
+        for (int i = 0; i < _M_activeNr; i++)
+        {
+            _M_threads[i].resume();
+        }
+    }
+}
+
+void ThreadManager::shutdown()
+{
+    // 在全部强制关闭前，首先确保队列为空
+    while (!_M_tasks.empty())
+    {
+        std::this_thread::yield();
+    }
+
+    // 已经将所有队列的任务都拿出，直接结束即可
+    forceShutdown();
+}
+
+void ThreadManager::forceShutdown()
+{
+    PoolStatus expectStatus = _M_status.load(std::memory_order_consume);
+    if (expectStatus == POOL_TERMINATED)
+    {
+        return;
+    }
+    if (_M_status.compare_exchange_strong(
+            expectStatus, POOL_TERMINATED,
+            std::memory_order_acq_rel))
+    {
+        // 要确保首先转换状态，直接全部结束即可
+        for (int i = 0; i < _M_poolSize; i++)
+        {
+            _M_threads[i].shutdown();
         }
     }
 }

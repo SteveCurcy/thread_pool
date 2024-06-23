@@ -51,6 +51,10 @@ public:
 
     size_t pop(_TyData* elems, size_t nr) override;
 
+    float getStress() {
+        return (float)size() / _M_allocSize;
+    }
+
     bool empty() const override {
         return _M_read.load(std::memory_order::memory_order_consume)
         == _M_readable.load(std::memory_order::memory_order_consume);
