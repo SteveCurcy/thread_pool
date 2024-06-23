@@ -1,96 +1,104 @@
 #include "Thread.h"
+#include <stdio.h>
 
-void Thread::run() {
-    int idleTime = 0;
-    while (getStatus() != STAT_SHUTDOWN && idleTime < getIdleTime()) {
-        if (!execStrategy(*this, *_M_affiliation)) {
-            idleTime++;
-            std::this_thread::yield();
-		} else {
-            idleTime = 0;
+Thread::~Thread()
+{
+    shutdown();
+    delete _M_thread;
+    printf("[INFO] Thread deleted!\n");
+}
+
+void Thread::run()
+{
+    while (_M_status.load() != THREAD_TERMINATED)
+    {
+        switch (_M_status.load(std::memory_order_consume))
+        {
+        case THREAD_RUNNING:
+        { // 大括号保证代码中使用的全部是局部变量
+            // 当线程的状态为运行时，从队列中获取一个任务执行
+            Task task;
+            if (_M_taskQue->pop(&task, 1))
+            {
+                task();
+            }
+            else
+            {
+                std::this_thread::yield();
+            }
+        }
+        break;
+        case THREAD_CREATED:
+        case THREAD_PAUSE:
+        {
+            std::unique_lock<std::mutex> lock(_M_mutex);
+            _M_cond.wait(lock);
+        }
+        break;
         }
     }
 }
 
-Thread::~Thread() {
-    if (_M_status.load(std::memory_order::memory_order_consume))
-        shutdown(); // 如果没有关闭，才进行关闭
-    /* 当线程指针不为空时才将其从线程池中移除 */
-    if (_M_thread)
-        _M_affiliation->removeThread(_M_thread->get_id());
-}
-
-// Thread::Thread(const Thread& other) {
-//     Thread& otherThread = const_cast<Thread&>(other);
-//     _M_affiliation = otherThread._M_affiliation;
-//     _M_status.store(otherThread._M_status.load(std::memory_order::memory_order_consume), std::memory_order::memory_order_release);
-//     execStrategy = otherThread.execStrategy;
-//     _M_thread = std::move(otherThread._M_thread);
-// }
-
-// Thread::Thread(Thread&& otherThread) noexcept {
-//     _M_affiliation = otherThread._M_affiliation;
-//     _M_status.store(otherThread._M_status.load(std::memory_order::memory_order_consume), std::memory_order::memory_order_release);
-//     execStrategy = otherThread.execStrategy;
-//     _M_thread = std::move(otherThread._M_thread);
-// }
-
-// Thread& Thread::operator=(const Thread& other) {
-//     Thread& otherThread = const_cast<Thread&>(other);
-//     _M_affiliation = otherThread._M_affiliation;
-//     _M_status.store(otherThread._M_status.load(std::memory_order::memory_order_consume), std::memory_order::memory_order_release);
-//     execStrategy = otherThread.execStrategy;
-//     _M_thread = std::move(otherThread._M_thread);
-//     return *this;
-// }
-
-// Thread& Thread::operator=(Thread&& otherThread) noexcept {
-//     _M_affiliation = otherThread._M_affiliation;
-//     _M_status.store(otherThread._M_status.load(std::memory_order::memory_order_consume), std::memory_order::memory_order_release);
-//     execStrategy = otherThread.execStrategy;
-//     _M_thread = std::move(otherThread._M_thread);
-//     return *this;
-// }
-
-bool ThreadManager::addThread(const Strategy& strategy, bool isCore) {
-    if (isCore && size() >= _M_coreSize) return false;
-    if (!isCore && size() >= _M_poolSize) return false;
-    
-    Thread *t = new Thread(this, defaultStrategy, isCore);
-    auto id = t->getId();
-    if (isCore) _M_cores.emplace(id, t);
-    else _M_threads.emplace(id, t);
-    _M_status++;
-    return true;
-}
-
-void ThreadManager::removeThread(std::thread::id id) {
-    if (!_M_cores.count(id) && !_M_threads.count(id)) return;
-    if (_M_cores.count(id)) {
-        _M_cores.erase(id);
-    } else {
-        _M_threads.erase(id);
+void Thread::start()
+{
+    int expectStatus = THREAD_CREATED;
+    if (_M_status.compare_exchange_strong(
+            expectStatus, THREAD_RUNNING,
+            std::memory_order_acq_rel))
+    {
+        // 只有从 CREATED 状态到 RUNNING 状态
+        // 才允许真正开始工作
+        _M_cond.notify_one();
     }
 }
 
-ThreadManager::~ThreadManager() {
-    while (!_M_tasks.empty()) {
-        std::this_thread::yield();
-    }
-    /* 手动关闭所有线程，防止程序还在执行导致的程序错误；
-     * 因为，线程的销毁和队列的销毁是无法确定的，所以应该
-     * 手动关闭来确保线程不会访问已经销毁的队列 */
-    for (auto& t: _M_threads) t.second->shutdown();
-    for (auto& t: _M_cores) t.second->shutdown();
-    printf("ThreadManager destruction: %lu tasks left.\n", _M_tasks.size());
+void Thread::pause()
+{
+    int expectStatus = _M_status.load();
+    if (expectStatus == THREAD_RUNNING)
+        return;
+    _M_status.compare_exchange_strong(
+        expectStatus, THREAD_PAUSE,
+        std::memory_order_acq_rel);
 }
 
-size_t defaultStrategy(const Thread& thrd, ThreadManager& thrdMngr) {
-    if (!thrd.isCore() && thrdMngr.getTaskQue().size() <= thrdMngr.getCore()) return 0;
-    Task task;
-    size_t cnt = thrdMngr.getTaskQue().pop(&task);
-    if (cnt) {
-        task();
+void Thread::resume()
+{
+    int expectStatus = THREAD_PAUSE;
+    if (_M_status.compare_exchange_strong(
+            expectStatus, THREAD_RUNNING,
+            std::memory_order_acq_rel))
+    {
+        // 只有从 CREATED 状态到 RUNNING 状态
+        // 才允许真正开始工作
+        _M_cond.notify_one();
     }
-    return cnt;
+}
+
+void Thread::shutdown()
+{
+    int expectStatus = _M_status.load(std::memory_order_consume);
+
+    if (expectStatus == THREAD_TERMINATED)
+    {
+        return;
+    }
+    if (_M_status.compare_exchange_strong(
+            expectStatus, THREAD_TERMINATED,
+            std::memory_order_acq_rel))
+    {
+        // 要确保首先转换状态，只完成正在执行的任务即可，
+        // 如果暂停或者还没开始，则直接唤醒并结束即可
+        if (expectStatus == THREAD_CREATED ||
+            expectStatus == THREAD_PAUSE)
+        {
+            _M_cond.notify_one();
+        }
+        // 只有当线程状态成功被转为终止态,
+        // 并且线程可以被终止才实现回收
+        if (_M_thread->joinable())
+        {
+            _M_thread->join();
+        }
+    }
 }
