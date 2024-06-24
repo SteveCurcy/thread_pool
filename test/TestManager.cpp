@@ -4,7 +4,7 @@
 using namespace std;
 
 atomic_int cnt;
-long long bucket[100000];
+int bucket[100000];
 
 void printNr(int a)
 {
@@ -22,9 +22,8 @@ int main()
         while (!ret.valid())
         {
             ret = mngr.submit(printNr, i);
-            
         }
     }
     mngr.shutdown();
-    return 0;
+    return cnt.load(std::memory_order_consume) - 100000;
 }

@@ -10,9 +10,10 @@ Thread::~Thread()
 
 void Thread::run()
 {
-    while (_M_status.load() != THREAD_TERMINATED)
+    while (_M_status.load(std::memory_order_consume) &
+           (~THREAD_TERMINATED))
     {
-        switch (_M_status.load(std::memory_order_consume))
+        switch (_M_status.load())
         {
         case THREAD_RUNNING:
         { // 大括号保证代码中使用的全部是局部变量
@@ -55,8 +56,7 @@ void Thread::start()
 void Thread::pause()
 {
     int expectStatus = _M_status;
-    if (expectStatus == THREAD_PAUSE ||
-        expectStatus == THREAD_TERMINATED)
+    if (expectStatus & (THREAD_PAUSE | THREAD_TERMINATED))
         return;
     _M_status.compare_exchange_strong(
         expectStatus, THREAD_PAUSE,
@@ -66,8 +66,7 @@ void Thread::pause()
 void Thread::resume()
 {
     int expectStatus = _M_status;
-    if (expectStatus != THREAD_PAUSE ||
-        expectStatus != THREAD_CREATED)
+    if (expectStatus & (THREAD_RUNNING | THREAD_TERMINATED))
         return;
     if (_M_status.compare_exchange_strong(
             expectStatus, THREAD_RUNNING,
@@ -81,7 +80,7 @@ void Thread::shutdown()
 {
     int expectStatus = _M_status.load(std::memory_order_consume);
 
-    if (expectStatus == THREAD_TERMINATED)
+    if (expectStatus & THREAD_TERMINATED)
     {
         return;
     }
@@ -91,8 +90,7 @@ void Thread::shutdown()
     {
         // 要确保首先转换状态，只完成正在执行的任务即可，
         // 如果暂停或者还没开始，则直接唤醒并结束即可
-        if (expectStatus == THREAD_CREATED ||
-            expectStatus == THREAD_PAUSE)
+        if (expectStatus & (THREAD_CREATED | THREAD_PAUSE))
         {
             _M_cond.notify_one();
         }
@@ -110,6 +108,61 @@ const int ThreadManager::coreNr = std::thread::hardware_concurrency();
 ThreadManager::~ThreadManager()
 {
     shutdown();
+}
+
+void ThreadManager::manage()
+{
+    // 管理工作线程
+    while (_M_status.load(std::memory_order_consume) &
+           (~POOL_TERMINATED))
+    {
+        switch (_M_status.load())
+        {
+        case POOL_RUNNING:
+        {
+            // 当线程池正在运行时，不断查看当前队列的压力，
+            // 当压力增大时，增加活动工作线程的数量，否则减少，
+            // 正在运行的线程数量不能少于CPU核心数
+            _M_spinLock.lock();
+            // 由于 vector 不能保证线程安全，因此操作时，
+            // 应该首先加锁，并且需要保证当前线程池不是
+            // 暂停、终止或开始
+            if (_M_status.load(std::memory_order_consume) &
+                POOL_RUNNING)
+            {
+                size_t expectNr = (int)_M_tasks.getStress() * _M_poolSize;
+                size_t nowNr = _M_activeNr;
+                if (expectNr >= 2 && nowNr != expectNr &&
+                    _M_activeNr.compare_exchange_strong(
+                        nowNr, expectNr,
+                        std::memory_order_acq_rel))
+                {
+                    if (nowNr > expectNr)
+                    {
+                        for (int i = nowNr - 1;
+                             i >= expectNr - 1; i--)
+                        {
+                            _M_threads[i].pause();
+                        }
+                    } else {
+                        for (int i = nowNr - 1; i < expectNr; i++) {
+                            _M_threads[i].resume();
+                        }
+                    }
+                }
+            }
+            _M_spinLock.unlock();
+        }
+        break;
+        case POOL_CREATED:
+        case POOL_PAUSE:
+        {
+            std::unique_lock<std::mutex> lock(_M_mutex);
+            _M_cond.wait(lock);
+        }
+        break;
+        }
+    }
 }
 
 void ThreadManager::start()
@@ -133,9 +186,10 @@ void ThreadManager::start()
 void ThreadManager::pause()
 {
     int expectStatus = _M_status;
-    if (expectStatus == POOL_PAUSE ||
-        expectStatus == POOL_TERMINATED)
+    if (expectStatus & (POOL_PAUSE | POOL_TERMINATED))
         return;
+
+    _M_spinLock.lock();
     if (_M_status.compare_exchange_strong(
             expectStatus, POOL_PAUSE,
             std::memory_order_acq_rel))
@@ -146,11 +200,14 @@ void ThreadManager::pause()
             _M_threads[i].pause();
         }
     }
+    _M_spinLock.unlock();
 }
 
 void ThreadManager::resume()
 {
     int expectStatus = POOL_PAUSE;
+
+    _M_spinLock.lock();
     if (_M_status.compare_exchange_strong(
             expectStatus, POOL_RUNNING,
             std::memory_order_acq_rel))
@@ -160,6 +217,7 @@ void ThreadManager::resume()
             _M_threads[i].resume();
         }
     }
+    _M_spinLock.unlock();
 }
 
 void ThreadManager::shutdown()
@@ -177,10 +235,10 @@ void ThreadManager::shutdown()
 void ThreadManager::forceShutdown()
 {
     PoolStatus expectStatus = _M_status.load(std::memory_order_consume);
-    if (expectStatus == POOL_TERMINATED)
-    {
+    if (expectStatus & POOL_TERMINATED)
         return;
-    }
+    
+    _M_spinLock.lock();
     if (_M_status.compare_exchange_strong(
             expectStatus, POOL_TERMINATED,
             std::memory_order_acq_rel))
@@ -191,4 +249,6 @@ void ThreadManager::forceShutdown()
             _M_threads[i].shutdown();
         }
     }
+    _M_spinLock.unlock();
+    _M_manager.join();
 }

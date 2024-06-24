@@ -38,7 +38,7 @@ class Task {
         }
     };
     
-    task_base* impl;
+    std::unique_ptr<task_base> impl;
 public:
     /**
      * 接收一个 std::packaged_task 类型的参数，将其包装依靠多态执行
@@ -50,33 +50,31 @@ public:
 
     Task(): impl(nullptr) {};
 
-    ~Task() { delete impl; }
+    ~Task() = default;
 
     Task(const Task &other) {
         Task& otherTask = const_cast<Task&>(other);
-        impl = otherTask.impl;
-        otherTask.impl = nullptr;
+        impl.reset();
+        impl.swap(otherTask.impl);
     }
-    Task(Task &&other): impl(other.impl) {
-        other.impl = nullptr;
+    Task(Task &&other): impl(std::move(other.impl)) {
+        other.impl.reset();
     }
 
     Task& operator=(const Task& other) noexcept {
         Task& otherTask = const_cast<Task&>(other);
-        delete impl;
-        impl = otherTask.impl;
-        otherTask.impl = nullptr;
+        impl.reset();
+        impl.swap(otherTask.impl);
         return *this;
     }
     Task& operator=(Task&& other) {
-        delete impl;
-        impl = other.impl;
-        other.impl = nullptr;
+        impl.reset();
+        impl.swap(other.impl);
         return *this;
     }
 
     void operator()() {
-        if (impl) impl->call();
+        if (impl != nullptr) impl->call();
     }
 };
 

@@ -17,6 +17,7 @@
 #include <vector>
 #include <functional>
 #include "Task.h"
+#include "Lock.h"
 #include "Queue.h"
 
 /* 此处是各个类的声明，主要为了后续交叉引用做准备 */
@@ -26,10 +27,10 @@ class Thread;
 class Thread final
 {
     using ThreadStatus = int;
-    static constexpr int THREAD_CREATED = 0;
-    static constexpr int THREAD_RUNNING = 1;
-    static constexpr int THREAD_PAUSE = 2;
-    static constexpr int THREAD_TERMINATED = -1;
+    static constexpr int THREAD_CREATED = 0x1;
+    static constexpr int THREAD_RUNNING = 0x2;
+    static constexpr int THREAD_PAUSE = 0x4;
+    static constexpr int THREAD_TERMINATED = 0x8;
 
     Queue<Task> *_M_taskQue;
     std::thread *_M_thread;
@@ -59,7 +60,7 @@ public:
     void setQue(Queue<Task> *quePtr)
     {
         if (!_M_taskQue &&
-            _M_status.load(std::memory_order_consume) == THREAD_CREATED)
+            _M_status.load(std::memory_order_consume) & THREAD_CREATED)
         {
             _M_taskQue = quePtr;
         }
@@ -80,11 +81,14 @@ public:
 
 class ThreadManager
 {
+    // 状态应该使用**位**存储，确保可以一次性判断是否处于某个状态集合。
+    // 例如，是否正在运行或者已经停止，可以使用：
+    // _M_status & (POOL_PAUSE | POOL_TERMINATED) 来测试
     using PoolStatus = int;
-    static constexpr int POOL_CREATED = 0;
-    static constexpr int POOL_RUNNING = 1;
-    static constexpr int POOL_PAUSE = 2;
-    static constexpr int POOL_TERMINATED = -1;
+    static constexpr int POOL_CREATED = 0x1;
+    static constexpr int POOL_RUNNING = 0x2;
+    static constexpr int POOL_PAUSE = 0x4;
+    static constexpr int POOL_TERMINATED = 0x8;
 
     static const int coreNr;
 
@@ -93,6 +97,14 @@ class ThreadManager
     std::atomic<PoolStatus> _M_status;
     size_t _M_poolSize;
     std::atomic<size_t> _M_activeNr;
+    std::thread         _M_manager;
+
+    std::mutex          _M_mutex;
+    // 使用自旋锁将线程池状态和线程实体绑定，
+    // 避免出现状态和线程实际工作状态不一致。
+    // 改变状态和线程操作同时进行
+    spinLock            _M_spinLock;
+    std::condition_variable _M_cond;
 
 public:
     ThreadManager(size_t poolSize = 10, size_t queueSize = 1000)
@@ -104,9 +116,12 @@ public:
         {
             _M_threads[i].setQue(&_M_tasks);
         }
+        _M_manager = std::thread(&ThreadManager::manage, this);
     }
 
     ~ThreadManager();
+
+    void manage();
 
     void start();
 
@@ -120,15 +135,6 @@ public:
     // 关闭，并且抛弃剩余任务
     void forceShutdown();
 
-    /**
-     * 提交一个任务，先将其封装为 Task 的形式，然后根据当前线程池的状态决定下一步的操作：
-     * - 如果没有到达核心线程的最大数量，则开启核心线程，并将任务推入任务队列；
-     * - 如果任务队列没满，且核心线程达到最大数量，则将任务直接放入任务队列；
-     * - 如果任务队列还差一个就满，且线程数量还没达到最大值，则开启一个新的普通线程，并将任务放入任务队列；
-     * - 如果任务队列还差一个满，且线程已经到达最大数量，则拒绝任务
-     *
-     * **NOTE**: packged_task 存储的目标可调用对象可能在**堆**上申请，或者使用提供的分配器。
-     */
     template <typename F, typename... ArgTp>
     std::future<typename std::result_of<F(ArgTp)...>::type> submit(F &&f, ArgTp &&...args)
     {

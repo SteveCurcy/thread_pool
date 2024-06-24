@@ -21,6 +21,7 @@ int main()
         ths[i].setQue(&que);
         ths[i].start();
     }
+    cout << "[INFO] All threads start..." << endl;
     for (int i = 0; i < 100000; i++) {
         packaged_task<void()> ptask = packaged_task<void()>(
             std::bind(printNr, i)
@@ -30,6 +31,7 @@ int main()
             this_thread::yield();
         }
     }
+    cout << "[INFO] All tasks added..." << endl;
     // 等队列为空，所有线程执行任务完成才能退出
     while (!que.empty()) {
         this_thread::yield();
