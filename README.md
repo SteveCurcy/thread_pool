@@ -35,7 +35,7 @@ ctest
 ```
 
 ## 4. 现有问题 :sandwich:
-已经不存在任务丢失问题。目前开发环境为 2 核 2G 服务器，因此可以支持的最大任务数量暂时测试为 10w。
+目前未发现问题。
 
 ## 5. 使用许可 :page_facing_up:
 [GPL 2.0](./LICENSE) &copy; Xu.Cao (Steve Curcy)
