@@ -1,10 +1,13 @@
 #include "Thread.h"
 #include <unistd.h>
 #include <iostream>
+#include <chrono>
 using namespace std;
 
+constexpr int turn = 1000000;
+
 atomic_int cnt;
-int bucket[100000];
+int bucket[turn];
 
 void printNr(int a)
 {
@@ -14,16 +17,19 @@ void printNr(int a)
 
 int main()
 {
-    ThreadManager mngr;
+    ThreadManager mngr(2);
     mngr.start();
-    for (int i = 0; i < 100000; i++)
+
+    auto startTime = chrono::system_clock::now();
+    for (int i = 0; i < turn; i++)
     {
-        std::future<void> ret;
-        while (!ret.valid())
-        {
-            ret = mngr.submit(printNr, i);
-        }
+        std::future<void> ret = mngr.submit(printNr, i);
     }
     mngr.shutdown();
-    return cnt.load(std::memory_order_consume) - 100000;
+
+    auto endTime = chrono::system_clock::now();
+    auto duration = chrono::duration_cast<chrono::milliseconds>(endTime - startTime);
+    cout <<  "[INFO] TestThread: Spent " << duration.count() << " ms." << endl;
+
+    return cnt.load(std::memory_order_consume) - turn;
 }

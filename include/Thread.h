@@ -90,20 +90,20 @@ class ThreadManager
     static constexpr int POOL_PAUSE = 0x4;
     static constexpr int POOL_TERMINATED = 0x8;
 
-    static const int coreNr;
+    static const size_t coreNr;
 
     std::vector<Thread> _M_threads;
     LockFreeQueue<Task> _M_tasks;
     std::atomic<PoolStatus> _M_status;
     size_t _M_poolSize;
     std::atomic<size_t> _M_activeNr;
-    std::thread         _M_manager;
+    std::thread _M_manager;
 
-    std::mutex          _M_mutex;
+    std::mutex _M_mutex;
     // 使用自旋锁将线程池状态和线程实体绑定，
     // 避免出现状态和线程实际工作状态不一致。
     // 改变状态和线程操作同时进行
-    spinLock            _M_spinLock;
+    spinLock _M_threadLock;
     std::condition_variable _M_cond;
 
 public:
@@ -112,11 +112,20 @@ public:
           _M_status(POOL_CREATED), _M_poolSize(poolSize),
           _M_activeNr(0)
     {
+        if (poolSize <= 1)
+        {
+            _M_poolSize = poolSize = 2;
+        }
         for (int i = 0; i < poolSize; i++)
         {
             _M_threads[i].setQue(&_M_tasks);
         }
         _M_manager = std::thread(&ThreadManager::manage, this);
+
+#ifndef NDEBUG
+        printf("[INFO] ThreadPool: Initialized with %lu threads and %lu slots in the queue at most!\n",
+               _M_poolSize, queueSize);
+#endif
     }
 
     ~ThreadManager();
@@ -136,22 +145,57 @@ public:
     void forceShutdown();
 
     template <typename F, typename... ArgTp>
-    std::future<typename std::result_of<F(ArgTp)...>::type> submit(F &&f, ArgTp &&...args)
+    std::future<typename std::result_of<F(ArgTp)...>::type> trySubmit(F &&f, ArgTp &&...args)
     {
-
         using result_type = typename std::result_of<F(ArgTp)...>::type;
-        std::packaged_task<result_type()> task_ = std::packaged_task<result_type()>(
-            std::bind(std::forward<F>(f),
-                      std::forward<ArgTp>(args)...));
-        std::future<result_type> res = task_.get_future(), dummy;
+        std::future<result_type> dummy;
+        if (_M_tasks.full())
+        {
+#ifndef NDEBUG
+            printf("\033[33m[WARNING] ThreadPool: Task queue is full and a task appended failed!\033[0m\n");
+#endif
+            return dummy;
+        }
+
+        std::packaged_task<result_type()> task_(std::bind(std::forward<F>(f),
+                                                          std::forward<ArgTp>(args)...));
+        std::future<result_type> res = task_.get_future();
 
         Task task(std::move(task_));
 
-        if (_M_status.load(std::memory_order_consume) != POOL_RUNNING ||
+        if (_M_status.load(std::memory_order_consume) & (~POOL_RUNNING) ||
             !_M_tasks.push(&task, 1))
         {
+#ifndef NDEBUG
+            printf("\033[33m[WARNING] ThreadPool: Task appended failed, 'cause pool is not running!\033[0m\n");
+#endif
             return dummy;
         }
+
+        return res;
+    }
+
+    template <typename F, typename... ArgTp>
+    std::future<typename std::result_of<F(ArgTp)...>::type> submit(F &&f, ArgTp &&...args)
+    {
+        using result_type = typename std::result_of<F(ArgTp)...>::type;
+
+        std::packaged_task<result_type()> task_(std::bind(std::forward<F>(f),
+                                                          std::forward<ArgTp>(args)...));
+        std::future<result_type> res = task_.get_future();
+
+        Task task(std::move(task_));
+
+        // 在添加任务的时候，要确保线程池处于执行状态，且状态不可改变
+        _M_threadLock.lock();
+        if (_M_status.load(std::memory_order_consume) & POOL_RUNNING)
+        {
+            while (!_M_tasks.push(&task, 1))
+            {
+                std::this_thread::yield();
+            }
+        }
+        _M_threadLock.unlock();
 
         return res;
     }

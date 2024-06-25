@@ -74,7 +74,7 @@ public:
     }
 
     void operator()() {
-        if (impl != nullptr) impl->call();
+        if (impl) impl->call();
     }
 };
 

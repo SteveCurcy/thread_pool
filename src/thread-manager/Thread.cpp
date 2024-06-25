@@ -5,7 +5,6 @@ Thread::~Thread()
 {
     shutdown();
     delete _M_thread;
-    printf("[INFO] Thread deleted!\n");
 }
 
 void Thread::run()
@@ -101,13 +100,21 @@ void Thread::shutdown()
             _M_thread->join();
         }
     }
+
+#ifndef NDEBUG
+    printf("[INFO] Thread: Shutted.\n");
+#endif
 }
 
-const int ThreadManager::coreNr = std::thread::hardware_concurrency();
+const size_t ThreadManager::coreNr = std::thread::hardware_concurrency();
 
 ThreadManager::~ThreadManager()
 {
-    shutdown();
+    if (_M_status.load(std::memory_order_consume) &
+        (~POOL_TERMINATED))
+    {
+        shutdown();
+    }
 }
 
 void ThreadManager::manage()
@@ -123,7 +130,7 @@ void ThreadManager::manage()
             // 当线程池正在运行时，不断查看当前队列的压力，
             // 当压力增大时，增加活动工作线程的数量，否则减少，
             // 正在运行的线程数量不能少于CPU核心数
-            _M_spinLock.lock();
+            _M_threadLock.lock();
             // 由于 vector 不能保证线程安全，因此操作时，
             // 应该首先加锁，并且需要保证当前线程池不是
             // 暂停、终止或开始
@@ -154,7 +161,9 @@ void ThreadManager::manage()
                     }
                 }
             }
-            _M_spinLock.unlock();
+            _M_threadLock.unlock();
+
+            std::this_thread::yield();
         }
         break;
         case POOL_CREATED:
@@ -166,24 +175,33 @@ void ThreadManager::manage()
         break;
         }
     }
+#ifndef NDEBUG
+    printf("[INFO] ThreadPool: Manager of pool ended!\n");
+#endif
 }
 
 void ThreadManager::start()
 {
     int expectStatus = POOL_CREATED;
+    _M_threadLock.lock();
     if (_M_status.compare_exchange_strong(
             expectStatus, POOL_RUNNING,
             std::memory_order_acq_rel))
     {
         // 只有从 CREATED 状态到 RUNNING 状态
         // 才允许真正开始工作
-        _M_activeNr.store(std::max(2, coreNr),
+        _M_activeNr.store(std::min(std::max((size_t)2, coreNr), _M_poolSize),
                           std::memory_order_release);
         for (int i = 0; i < _M_activeNr; i++)
         {
             _M_threads[i].start();
         }
     }
+    _M_cond.notify_one();
+    _M_threadLock.unlock();
+#ifndef NDEBUG
+    printf("[INFO] ThreadPool: %lu thread(s) and the Manager has started!\n", _M_activeNr.load(std::memory_order_relaxed));
+#endif
 }
 
 void ThreadManager::pause()
@@ -192,7 +210,7 @@ void ThreadManager::pause()
     if (expectStatus & (POOL_PAUSE | POOL_TERMINATED))
         return;
 
-    _M_spinLock.lock();
+    _M_threadLock.lock();
     if (_M_status.compare_exchange_strong(
             expectStatus, POOL_PAUSE,
             std::memory_order_acq_rel))
@@ -203,24 +221,24 @@ void ThreadManager::pause()
             _M_threads[i].pause();
         }
     }
-    _M_spinLock.unlock();
+    _M_threadLock.unlock();
 }
 
 void ThreadManager::resume()
 {
     int expectStatus = POOL_PAUSE;
 
-    _M_spinLock.lock();
+    _M_threadLock.lock();
     if (_M_status.compare_exchange_strong(
             expectStatus, POOL_RUNNING,
-            std::memory_order_acq_rel))
+            std::memory_order::memory_order_acq_rel))
     {
         for (int i = 0; i < _M_activeNr; i++)
         {
             _M_threads[i].resume();
         }
     }
-    _M_spinLock.unlock();
+    _M_threadLock.unlock();
 }
 
 void ThreadManager::shutdown()
@@ -230,6 +248,10 @@ void ThreadManager::shutdown()
     {
         std::this_thread::yield();
     }
+
+#ifndef NDEBUG
+    printf("[INFO] ThreadPool: All tasks finished. Pool is shutting...\n");
+#endif
 
     // 已经将所有队列的任务都拿出，直接结束即可
     forceShutdown();
@@ -241,7 +263,16 @@ void ThreadManager::forceShutdown()
     if (expectStatus & POOL_TERMINATED)
         return;
 
-    _M_spinLock.lock();
+#ifndef NDEBUG
+    printf("[INFO] ThreadPool: Waiting the spin lock for shutting...\n");
+#endif
+
+    _M_threadLock.lock();
+
+#ifndef NDEBUG
+    printf("[INFO] ThreadPool: Start shutting the thread pool...\n");
+#endif
+
     if (_M_status.compare_exchange_strong(
             expectStatus, POOL_TERMINATED,
             std::memory_order_acq_rel))
@@ -252,6 +283,14 @@ void ThreadManager::forceShutdown()
             _M_threads[i].shutdown();
         }
     }
-    _M_spinLock.unlock();
+
+#ifndef NDEBUG
+    printf("[INFO] ThreadPool: All threads is shutted!\n");
+#endif
+    _M_threadLock.unlock();
     _M_manager.join();
+
+#ifndef NDEBUG
+    printf("[INFO] ThreadPool: Shutted!\n");
+#endif
 }

@@ -1,10 +1,13 @@
 #include "Thread.h"
 #include <unistd.h>
 #include <iostream>
+#include <chrono>
 using namespace std;
 
+constexpr int turn = 1000000;
+
 atomic_int cnt;
-long long bucket[100000];
+long long bucket[turn];
 
 void printNr(int a)
 {
@@ -14,15 +17,15 @@ void printNr(int a)
 
 int main()
 {
-    LockFreeQueue<Task> que(1000);
-    constexpr int Nr = (1 << 1);
+    LockFreeQueue<Task> que;
+    constexpr int Nr = 2;
     Thread ths[Nr];
     for (int i = 0; i < Nr; i++) {
         ths[i].setQue(&que);
         ths[i].start();
     }
-    cout << "[INFO] All threads start..." << endl;
-    for (int i = 0; i < 100000; i++) {
+    auto startTime = chrono::system_clock::now();
+    for (int i = 0; i < turn; i++) {
         packaged_task<void()> ptask = packaged_task<void()>(
             std::bind(printNr, i)
         );
@@ -31,7 +34,6 @@ int main()
             this_thread::yield();
         }
     }
-    cout << "[INFO] All tasks added..." << endl;
     // 等队列为空，所有线程执行任务完成才能退出
     while (!que.empty()) {
         this_thread::yield();
@@ -39,5 +41,10 @@ int main()
     for (int i = 0; i < Nr; i++) {
         ths[i].shutdown();
     }
-    return cnt.load(std::memory_order_consume) - 100000;
+
+    auto endTime = chrono::system_clock::now();
+    auto duration = chrono::duration_cast<chrono::milliseconds>(endTime - startTime);
+    cout <<  "[INFO] TestThread: Spent " << duration.count() << " ms." << endl;
+
+    return cnt.load(std::memory_order_consume) - turn;
 }
