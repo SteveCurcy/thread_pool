@@ -18,18 +18,22 @@ void printNr(int a)
 int main()
 {
     ThreadManager mngr(2);
+    long long costTime = 0LL;
     mngr.start();
 
-    auto startTime = chrono::system_clock::now();
     for (int i = 0; i < turn; i++)
     {
+        auto startTime = chrono::system_clock::now();
+
         std::future<void> ret = mngr.submit(printNr, i);
+
+        auto endTime = chrono::system_clock::now();
+        auto duration = chrono::duration_cast<chrono::microseconds>(endTime - startTime);
+        costTime += duration.count();
     }
     mngr.shutdown();
 
-    auto endTime = chrono::system_clock::now();
-    auto duration = chrono::duration_cast<chrono::milliseconds>(endTime - startTime);
-    cout <<  "[INFO] TestThread: Spent " << duration.count() << " ms." << endl;
+    cout << "[INFO] TestThread: Spent " << ((double)costTime / turn) << " us/task." << endl;
 
     return cnt.load(std::memory_order_consume) - turn;
 }

@@ -1,5 +1,5 @@
 # thread_pool
-[![](https://img.shields.io/badge/Author-Xu.Cao-lightgreen)](https://github.com/SteveCurcy) ![](https://img.shields.io/badge/Version-2.1.0-yellow)
+[![](https://img.shields.io/badge/Author-Xu.Cao-lightgreen)](https://github.com/SteveCurcy) ![](https://img.shields.io/badge/Version-2.1.2-yellow)
 
 基于 C++ 实现的线程池，简单但高效。
 
@@ -20,6 +20,8 @@
 - 无锁化队列：使用「CAS 机制」实现了队列的无锁化，可以实现轻量级元素添加、弹出，批量添加和弹出，避免了互斥锁带来的高额开销。
 - 自旋锁：使用「原子类型」实现了自旋锁，在短期加锁、解锁过程中替代「互斥锁」和「条件变量」，从而提高项目性能。
 - 暂停和恢复：可以暂停/恢复线程池的任务执行（已经在执行的任务无法暂停），使用「条件变量」实现，因此高频率暂停/恢复会带来较大的开销。
+
+在现有的线程池项目中，线程池测试代码 TestManager 会比线程测试代码 TestThread 开销更高。因为线程池的目的是可以接受「任意函数」作为目标执行函数，使用了「模板函数」作为任务提交的接口，而线程测试代码中使用了「固定的目标执行函数」。因此，TestManager 的执行时间比 TestThread 的更高。
 
 ## 3. 安装和运行 :birthday:
 
