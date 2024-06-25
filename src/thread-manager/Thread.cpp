@@ -144,8 +144,11 @@ void ThreadManager::manage()
                         {
                             _M_threads[i].pause();
                         }
-                    } else {
-                        for (int i = nowNr - 1; i < expectNr; i++) {
+                    }
+                    else
+                    {
+                        for (int i = nowNr - 1; i < expectNr; i++)
+                        {
                             _M_threads[i].resume();
                         }
                     }
@@ -237,7 +240,7 @@ void ThreadManager::forceShutdown()
     PoolStatus expectStatus = _M_status.load(std::memory_order_consume);
     if (expectStatus & POOL_TERMINATED)
         return;
-    
+
     _M_spinLock.lock();
     if (_M_status.compare_exchange_strong(
             expectStatus, POOL_TERMINATED,
