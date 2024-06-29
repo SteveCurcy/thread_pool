@@ -20,9 +20,13 @@
 #include "Lock.h"
 #include "Queue.h"
 
+#ifndef NDEBUG
+#include <stdio.h>
+#endif
+
 /* 此处是各个类的声明，主要为了后续交叉引用做准备 */
 class Thread;
-// class ThreadManager;
+class ThreadManager;
 
 class Thread final
 {

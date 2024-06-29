@@ -1,5 +1,4 @@
 #include "Thread.h"
-#include <stdio.h>
 
 Thread::~Thread()
 {
