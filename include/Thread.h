@@ -3,8 +3,7 @@
  * @author Xu.Cao
  * @details
  *  本代码主要用于线程管理，由于线程管理部分耦合度较高，因此统一放置在本文件中。
- * 本模块主要包括：Thread、ThreadManager 两大类，具体细节
- * 请参见类注释。
+ * 本模块主要包括：Thread、ThreadManager 两大类，具体细节请参见类注释。
  */
 #ifndef THREAD_H
 #define THREAD_H

@@ -9,7 +9,21 @@
 
 constexpr size_t QUEUE_DEFAULT_SIZE = 1000;
 
-/* 线程安全队列，提供一个队列的接口 */
+/**
+ * @template _TyData
+ * @class Queue
+ * @brief 队列的抽象基类模板
+ *
+ * Queue 类是一个模板类，用于定义队列的抽象接口。它提供了队列的基本操作，如入队（push）、
+ * 出队（pop）、获取队列大小（size）、容量（capacity）、判断队列是否已满（full）和
+ * 是否为空（empty）的接口。这些接口是纯虚函数，需要由派生类具体实现。
+ *
+ * 队列是一种先进先出（FIFO）的数据结构，它允许在队列的一端（队尾）添加元素，在另一端
+ * （队头）移除元素。
+ *
+ * @note 由于这个类是抽象基类，因此不能直接实例化。必须通过继承这个类并实现其所有纯虚函数
+ * 来创建具体的队列类。
+ */
 template <typename _TyData>
 class Queue
 {
@@ -24,9 +38,15 @@ public:
 };
 
 /**
+ * @template _TyData 队列中存储的数据类型。
+ * @class LockFreeQueue
+ * @brief 无锁队列类，继承自 Queue 模板类。
+ *
+ * 提供了一个线程安全的无锁队列实现，使用原子操作来管理读写位置。
  * 当前的类是一个环形队列，可以看作一个 ringbuffer，其长度在初始化时固定；
  * 申请空间大小不可改变，因此是定长的队列，通过 CAS 机制保证其无锁操作;
  * 空余一个位置用于区分队列满/空
+ *
  */
 template <typename _TyData>
 class LockFreeQueue final : public Queue<_TyData>
