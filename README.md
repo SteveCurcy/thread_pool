@@ -1,5 +1,5 @@
 # thread_pool
-[![](https://img.shields.io/badge/Author-Xu.Cao-lightgreen)](https://github.com/SteveCurcy) ![](https://img.shields.io/badge/Version-2.1.2-yellow)
+[![](https://img.shields.io/badge/Author-Xu.Cao-lightgreen)](https://github.com/SteveCurcy) ![](https://img.shields.io/badge/Version-2.1.3-yellow)
 
 基于 C++ 实现的线程池，简单但高效。
 
