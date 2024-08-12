@@ -179,9 +179,9 @@ public:
     }
 
     template <typename F, typename... ArgTp>
-    std::future<typename std::result_of<F(ArgTp)...>::type> submit(F &&f, ArgTp &&...args)
+    std::future<typename std::result_of<F(ArgTp...)>::type> submit(F &&f, ArgTp &&...args)
     {
-        using result_type = typename std::result_of<F(ArgTp)...>::type;
+        using result_type = typename std::result_of<F(ArgTp...)>::type;
 
         std::packaged_task<result_type()> task_(std::bind(std::forward<F>(f),
                                                           std::forward<ArgTp>(args)...));
